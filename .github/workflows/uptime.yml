@@ -93,14 +93,6 @@ jobs:
           echo "--- status=$status endpoint_ok=$ok_count/$total ---"
           printf '%s\n' "$reasons" | sed '/^$/d'
 
-      - name: Verify secret integrity
-        env:
-          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          echo "bot_token_sha256=$(printf '%s' "$BOT_TOKEN" | sha256sum | cut -c1-16)"
-          echo "chat_id_sha256=$(printf '%s' "$CHAT_ID" | sha256sum | cut -c1-16)"
-
       - name: Report and reconcile issue
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
