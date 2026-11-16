@@ -33,7 +33,7 @@ env:
   # Sha tetap untuk attach commit-status heartbeat (VPS tidak menulis ke branch,
   # jadi tidak ada konflik push dengan workflow ini).
   HEARTBEAT_SHA: f48a8df5034c9aefa11ea87d57deb21c5f59059d
-  HEARTBEAT_MAX_AGE_SEC: 900
+  HEARTBEAT_MAX_AGE_SEC: 1
   ISSUE_TITLE: "VPS DOWN: korea-vps (OMP)"
 
 jobs:
