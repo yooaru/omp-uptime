@@ -116,13 +116,13 @@ jobs:
           }
 
           number=$(gh issue list --state open --json number,title --jq '.[] | select(.title=="'"$ISSUE_TITLE"'") | .number' | head -1)
-          body=$(printf 'Status: %s\nEndpoint hidup: %s/%s\nHeartbeat terakhir: %s (%s detik lalu)\n\n%s\n\n_ dipantau tiap 10 menit oleh GitHub Actions _' \
-                 "$STATUS" "$OK_COUNT" "$TOTAL" "${HB_CREATED:-tidak ada}" "${HB_AGE:-?}" "$REASONS")
-
           if [ -n "${SIMULATE:-}" ]; then
             STATUS="$SIMULATE"
             REASONS="${REASONS}"$'\n'"- SIMULASI manual (dispatch), bukan hasil cek nyata"
           fi
+
+          body=$(printf 'Status: %s\nEndpoint hidup: %s/%s\nHeartbeat terakhir: %s (%s detik lalu)\n\n%s\n\n_ dipantau tiap 10 menit oleh GitHub Actions _' \
+                 "$STATUS" "$OK_COUNT" "$TOTAL" "${HB_CREATED:-tidak ada}" "${HB_AGE:-?}" "$REASONS")
 
           case "$STATUS" in
             up)
