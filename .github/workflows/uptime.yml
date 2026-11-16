@@ -1,0 +1,125 @@
+name: uptime
+
+# Monitor eksternal untuk OMP VPS (korea-vps / Azure Korea Central).
+# Box-nya sendiri tidak bisa melaporkan "saya beku" waktu beku — makanya pemantau
+# ini hidup di luar box: jadwal GitHub Actions + heartbeat commit-status dari VPS.
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  ENDPOINTS: >-
+    https://prl.rioganteng.my.id/
+    https://ffbot.rioganteng.my.id/
+    https://9router.rioganteng.my.id/
+  HEARTBEAT_CONTEXT: omp-vps-heartbeat
+  # Sha tetap untuk attach commit-status heartbeat (VPS tidak menulis ke branch,
+  # jadi tidak ada konflik push dengan workflow ini).
+  HEARTBEAT_SHA: PLACEHOLDER_SHA
+  HEARTBEAT_MAX_AGE_SEC: 900
+  ISSUE_TITLE: "VPS DOWN: korea-vps (OMP)"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Evaluate health
+        id: health
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          reasons=""
+          ok_count=0
+          total=0
+          for url in $ENDPOINTS; do
+            total=$((total+1))
+            code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "$url" 2>/dev/null || echo 000)
+            case "$code" in
+              200|204|301|302|307|401|403) ok_count=$((ok_count+1));;
+              *) reasons="${reasons}"$'\n'"- endpoint $url -> HTTP $code";;
+            esac
+          done
+
+          hb_created=""
+          hb_age=""
+          hb_created=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${HEARTBEAT_SHA}/status" \
+            --jq '[.statuses[] | select(.context=="'"$HEARTBEAT_CONTEXT"'")] | first | .created_at // ""' 2>/dev/null || echo "")
+          if [ -n "$hb_created" ]; then
+            hb_epoch=$(date -u -d "$hb_created" +%s 2>/dev/null || echo 0)
+            hb_age=$(( $(date -u +%s) - hb_epoch ))
+            if [ "$hb_age" -gt "$HEARTBEAT_MAX_AGE_SEC" ]; then
+              reasons="${reasons}"$'\n'"- heartbeat VPS basi (${hb_age}s > ${HEARTBEAT_MAX_AGE_SEC}s) - box beku"
+            fi
+          else
+            reasons="${reasons}"$'\n'"- heartbeat VPS tidak ada - commit-status belum pernah dibuat"
+          fi
+
+          if [ "$ok_count" -eq 0 ]; then
+            status=down
+          elif [ "$ok_count" -lt "$total" ] || [ -n "$reasons" ]; then
+            status=degraded
+          else
+            status=up
+          fi
+
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          echo "ok_count=$ok_count" >> "$GITHUB_OUTPUT"
+          echo "total=$total" >> "$GITHUB_OUTPUT"
+          echo "hb_age=$hb_age" >> "$GITHUB_OUTPUT"
+          echo "hb_created=$hb_created" >> "$GITHUB_OUTPUT"
+          {
+            echo "reasons<<REASONS_EOF"
+            printf '%s\n' "$reasons" | sed '/^$/d'
+            echo "REASONS_EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "--- status=$status endpoint_ok=$ok_count/$total ---"
+          printf '%s\n' "$reasons" | sed '/^$/d'
+
+      - name: Report and reconcile issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          STATUS: ${{ steps.health.outputs.status }}
+          OK_COUNT: ${{ steps.health.outputs.ok_count }}
+          TOTAL: ${{ steps.health.outputs.total }}
+          HB_AGE: ${{ steps.health.outputs.hb_age }}
+          HB_CREATED: ${{ steps.health.outputs.hb_created }}
+          REASONS: ${{ steps.health.outputs.reasons }}
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          set -uo pipefail
+          say() {
+            [ -n "${BOT_TOKEN:-}" ] && [ -n "${CHAT_ID:-}" ] || return 0
+            curl -sS --max-time 20 -o /dev/null \
+              -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+              --data-urlencode "chat_id=${CHAT_ID}" \
+              --data-urlencode "text=$1" \
+              --data-urlencode "disable_web_page_preview=true" || true
+          }
+
+          number=$(gh issue list --state open --json number,title --jq '.[] | select(.title=="'"$ISSUE_TITLE"'") | .number' | head -1)
+          body=$(printf 'Status: %s\nEndpoint hidup: %s/%s\nHeartbeat terakhir: %s (%s detik lalu)\n\n%s\n\n_ dipantau tiap 10 menit oleh GitHub Actions _' \
+                 "$STATUS" "$OK_COUNT" "$TOTAL" "${HB_CREATED:-tidak ada}" "${HB_AGE:-?}" "$REASONS")
+
+          case "$STATUS" in
+            up)
+              if [ -n "$number" ]; then
+                gh issue close "$number" --comment "Sembuh lagi $(date -u +%FT%TZ). $body" >/dev/null
+                say "✅ OMP VPS korea-vps PULIH\n\n$body"
+              fi
+              ;;
+            down|degraded)
+              if [ -z "$number" ]; then
+                gh issue create --title "$ISSUE_TITLE" --body "$body" >/dev/null
+                say "🚨 OMP VPS korea-vps $STATUS\n\n$body"
+              else
+                gh issue comment "$number" --body "$body" >/dev/null
+              fi
+              ;;
+          esac
