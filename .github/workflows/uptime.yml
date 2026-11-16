@@ -13,6 +13,8 @@ permissions:
   issues: write
 
 env:
+  # gh CLI butuh konteks repo eksplisit di runner (tidak ada checkout git).
+  GH_REPO: ${{ github.repository }}
   ENDPOINTS: >-
     https://prl.rioganteng.my.id/
     https://ffbot.rioganteng.my.id/
@@ -110,7 +112,8 @@ jobs:
           case "$STATUS" in
             up)
               if [ -n "$number" ]; then
-                gh issue close "$number" --comment "Sembuh lagi $(date -u +%FT%TZ). $body" >/dev/null
+                gh issue comment "$number" --body "Sembuh lagi $(date -u +%FT%TZ). $body" >/dev/null
+                gh issue close "$number" >/dev/null
                 say "✅ OMP VPS korea-vps PULIH\n\n$body"
               fi
               ;;
